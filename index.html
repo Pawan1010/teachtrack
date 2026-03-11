@@ -913,21 +913,52 @@
         let lectures = [];
         let currentMonth = new Date();
 
-        function loadData() {
-            const savedClasses = localStorage.getItem('teacherClasses');
-            const savedLectures = localStorage.getItem('teacherLectures');
-            
-            if (savedClasses) classes = JSON.parse(savedClasses);
-            if (savedLectures) lectures = JSON.parse(savedLectures);
+        // --- API helpers ---
+        async function api(path, options = {}) {
+            const res = await fetch(path, {
+                headers: { 'Content-Type': 'application/json' },
+                ...options,
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                throw new Error(data.error || `Request failed (${res.status})`);
+            }
+            return data;
         }
 
-        function saveData() {
-            localStorage.setItem('teacherClasses', JSON.stringify(classes));
-            localStorage.setItem('teacherLectures', JSON.stringify(lectures));
+        async function loadData() {
+            const month = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+            try {
+                const [classData, lectureData] = await Promise.all([
+                    api('/api/classes'),
+                    api(`/api/lectures?month=${month}`)
+                ]);
+                classes = Array.isArray(classData) ? classData.map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    hourlyRate: parseFloat(c.hourly_rate),
+                    totalHours: parseFloat(c.total_hours),
+                    totalEarnings: parseFloat(c.total_earnings),
+                    lectureCount: parseInt(c.lecture_count)
+                })) : [];
+                lectures = Array.isArray(lectureData) ? lectureData.map(l => ({
+                    id: l.id,
+                    classId: l.class_id,
+                    className: l.class_name,
+                    date: l.date,
+                    duration: parseFloat(l.duration),
+                    topic: l.topic,
+                    earnings: parseFloat(l.earnings),
+                    hourlyRate: parseFloat(l.hourly_rate),
+                    paid: l.paid
+                })) : [];
+            } catch (err) {
+                console.error('Failed to load data:', err);
+            }
         }
 
-        function init() {
-            loadData();
+        async function init() {
+            await loadData();
             updateMonthDisplay();
             updateStats();
             renderDashboard();
@@ -935,22 +966,40 @@
             renderLectures();
             renderPayments();
             updateClassDropdown();
-            
+
             document.getElementById('lectureDate').valueAsDate = new Date();
         }
 
-        function changeMonth(delta) {
+        async function changeMonth(delta) {
             currentMonth.setMonth(currentMonth.getMonth() + delta);
             updateMonthDisplay();
-            updateStats();
-            renderDashboard();
-            renderLectures();
-            renderPayments();
+            await refreshLectures();
         }
 
-        function goToCurrentMonth() {
+        async function goToCurrentMonth() {
             currentMonth = new Date();
             updateMonthDisplay();
+            await refreshLectures();
+        }
+
+        async function refreshLectures() {
+            const month = `${currentMonth.getFullYear()}-${String(currentMonth.getMonth() + 1).padStart(2, '0')}`;
+            try {
+                const lectureData = await api(`/api/lectures?month=${month}`);
+                lectures = Array.isArray(lectureData) ? lectureData.map(l => ({
+                    id: l.id,
+                    classId: l.class_id,
+                    className: l.class_name,
+                    date: l.date,
+                    duration: parseFloat(l.duration),
+                    topic: l.topic,
+                    earnings: parseFloat(l.earnings),
+                    hourlyRate: parseFloat(l.hourly_rate),
+                    paid: l.paid
+                })) : [];
+            } catch (err) {
+                console.error('Failed to refresh lectures:', err);
+            }
             updateStats();
             renderDashboard();
             renderLectures();
@@ -960,129 +1009,109 @@
         function updateMonthDisplay() {
             const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
                 'July', 'August', 'September', 'October', 'November', 'December'];
-            document.getElementById('currentMonth').textContent = 
+            document.getElementById('currentMonth').textContent =
                 `${monthNames[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
         }
 
-        function isInCurrentMonth(dateString) {
-            const date = new Date(dateString);
-            return date.getMonth() === currentMonth.getMonth() && 
-                   date.getFullYear() === currentMonth.getFullYear();
-        }
-
-        document.getElementById('classForm').addEventListener('submit', (e) => {
+        document.getElementById('classForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const className = document.getElementById('className').value;
             const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
-            
-            const newClass = {
-                id: Date.now(),
-                name: className,
-                hourlyRate: hourlyRate,
-                totalHours: 0,
-                totalEarnings: 0,
-                lectureCount: 0
-            };
-            
-            classes.push(newClass);
-            saveData();
-            
-            document.getElementById('classForm').reset();
-            renderClasses();
-            updateClassDropdown();
+
+            try {
+                await api('/api/classes', {
+                    method: 'POST',
+                    body: JSON.stringify({ name: className, hourlyRate })
+                });
+
+                document.getElementById('classForm').reset();
+                await loadData();
+                renderClasses();
+                updateClassDropdown();
+            } catch (err) {
+                alert('Failed to add class: ' + err.message);
+            }
         });
 
-        document.getElementById('lectureForm').addEventListener('submit', (e) => {
+        document.getElementById('lectureForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
+
             const classId = parseInt(document.getElementById('lectureClass').value);
             const date = document.getElementById('lectureDate').value;
             const duration = parseFloat(document.getElementById('lectureDuration').value);
             const topic = document.getElementById('lectureTopic').value;
             const paid = document.getElementById('lecturePaid').checked;
-            
-            const selectedClass = classes.find(c => c.id === classId);
-            const earnings = duration * selectedClass.hourlyRate;
-            
-            const newLecture = {
-                id: Date.now(),
-                classId: classId,
-                className: selectedClass.name,
-                date: date,
-                duration: duration,
-                topic: topic,
-                earnings: earnings,
-                hourlyRate: selectedClass.hourlyRate,
-                paid: paid
-            };
-            
-            lectures.push(newLecture);
-            
-            selectedClass.totalHours += duration;
-            selectedClass.totalEarnings += earnings;
-            selectedClass.lectureCount += 1;
-            
-            saveData();
-            
-            document.getElementById('lectureDuration').value = '';
-            document.getElementById('lectureTopic').value = '';
-            document.getElementById('lecturePaid').checked = false;
-            
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
+
+            if (!classId || !date || !duration) {
+                alert('Please fill in all required fields (class, date, and duration).');
+                return;
+            }
+
+            try {
+                await api('/api/lectures', {
+                    method: 'POST',
+                    body: JSON.stringify({ classId, date, duration, topic, paid })
+                });
+
+                document.getElementById('lectureDuration').value = '';
+                document.getElementById('lectureTopic').value = '';
+                document.getElementById('lecturePaid').checked = false;
+
+                await loadData();
+                updateStats();
+                renderDashboard();
+                renderClasses();
+                renderLectures();
+                renderPayments();
+            } catch (err) {
+                alert('Failed to log lecture: ' + err.message);
+            }
         });
 
         function updateStats() {
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
-            const monthlyEarnings = monthLectures.reduce((sum, l) => sum + l.earnings, 0);
-            const paidEarnings = monthLectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
+            const monthlyEarnings = lectures.reduce((sum, l) => sum + l.earnings, 0);
+            const paidEarnings = lectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
             const pendingEarnings = monthlyEarnings - paidEarnings;
-            const monthlyHours = monthLectures.reduce((sum, l) => sum + l.duration, 0);
-            
+            const monthlyHours = lectures.reduce((sum, l) => sum + l.duration, 0);
+
             document.getElementById('monthlyEarnings').textContent = '₹' + monthlyEarnings.toLocaleString('en-IN');
             document.getElementById('paidAmount').textContent = '₹' + paidEarnings.toLocaleString('en-IN');
             document.getElementById('pendingAmount').textContent = '₹' + pendingEarnings.toLocaleString('en-IN');
             document.getElementById('monthlyHours').textContent = monthlyHours.toFixed(1);
-            
-            const lectureCount = monthLectures.length;
+
+            const lectureCount = lectures.length;
             document.getElementById('earningsTrend').textContent = `${lectureCount} lectures`;
         }
 
         function renderDashboard() {
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
             // Overview stats
-            const totalLectures = monthLectures.length;
-            const totalHours = monthLectures.reduce((sum, l) => sum + l.duration, 0);
+            const totalLectures = lectures.length;
+            const totalHours = lectures.reduce((sum, l) => sum + l.duration, 0);
             const avgHours = totalLectures > 0 ? totalHours / totalLectures : 0;
-            
+
             document.getElementById('dashLectures').textContent = totalLectures;
             document.getElementById('dashHours').textContent = totalHours.toFixed(1) + 'h';
             document.getElementById('dashAvg').textContent = avgHours.toFixed(1) + 'h';
-            
+
             // Payment progress
-            const totalEarnings = monthLectures.reduce((sum, l) => sum + l.earnings, 0);
-            const paidEarnings = monthLectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
+            const totalEarnings = lectures.reduce((sum, l) => sum + l.earnings, 0);
+            const paidEarnings = lectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
             const paymentPercent = totalEarnings > 0 ? (paidEarnings / totalEarnings * 100) : 0;
-            
+
             const progressFill = document.getElementById('paymentProgress');
             progressFill.style.width = paymentPercent + '%';
             progressFill.textContent = paymentPercent >= 20 ? Math.round(paymentPercent) + '%' : '';
-            
+
             document.getElementById('paymentPercent').textContent = Math.round(paymentPercent) + '% Paid';
-            document.getElementById('paymentRatio').textContent = 
+            document.getElementById('paymentRatio').textContent =
                 `₹${paidEarnings.toLocaleString('en-IN')} / ₹${totalEarnings.toLocaleString('en-IN')}`;
-            
+
             // Earnings by class
             const classTotals = {};
             let maxEarnings = 0;
-            
-            monthLectures.forEach(l => {
+
+            lectures.forEach(l => {
                 if (!classTotals[l.className]) {
                     classTotals[l.className] = { earnings: 0, hours: 0, count: 0 };
                 }
@@ -1091,14 +1120,14 @@
                 classTotals[l.className].count += 1;
                 maxEarnings = Math.max(maxEarnings, classTotals[l.className].earnings);
             });
-            
+
             const classBreakdown = document.getElementById('classBreakdown');
             if (Object.keys(classTotals).length === 0) {
                 classBreakdown.innerHTML = '<div class="empty-state" style="padding: 20px;">No data for this month</div>';
             } else {
                 const sortedClasses = Object.entries(classTotals)
                     .sort((a, b) => b[1].earnings - a[1].earnings);
-                
+
                 classBreakdown.innerHTML = sortedClasses.map(([name, data]) => `
                     <div class="class-breakdown-item">
                         <div class="class-breakdown-name">${name}</div>
@@ -1109,23 +1138,23 @@
                     </div>
                 `).join('');
             }
-            
+
             // Recent activity
             const recentActivity = document.getElementById('recentActivity');
-            if (monthLectures.length === 0) {
+            if (lectures.length === 0) {
                 recentActivity.innerHTML = '<div class="empty-state" style="padding: 20px;">No recent activity</div>';
             } else {
-                const recent = [...monthLectures]
+                const recent = [...lectures]
                     .sort((a, b) => new Date(b.date) - new Date(a.date))
                     .slice(0, 5);
-                
+
                 recentActivity.innerHTML = recent.map(l => `
                     <div class="activity-item">
                         <div class="activity-icon">${l.paid ? '✓' : '⏱'}</div>
                         <div class="activity-details">
                             <div class="activity-title">${l.className}</div>
                             <div class="activity-meta">
-                                ${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})} 
+                                ${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}
                                 • ${l.duration}h
                                 ${l.topic ? '• ' + l.topic : ''}
                             </div>
@@ -1134,7 +1163,7 @@
                     </div>
                 `).join('');
             }
-            
+
             // Top earning class
             const topClass = document.getElementById('topClass');
             if (Object.keys(classTotals).length === 0) {
@@ -1147,7 +1176,7 @@
                     <div class="highlight-subtext">₹${top[1].earnings.toLocaleString('en-IN')} • ${top[1].count} lectures</div>
                 `;
             }
-            
+
             // Most frequent class
             const mostFrequent = document.getElementById('mostFrequent');
             if (Object.keys(classTotals).length === 0) {
@@ -1164,12 +1193,12 @@
 
         function renderClasses() {
             const classList = document.getElementById('classList');
-            
+
             if (classes.length === 0) {
                 classList.innerHTML = '<div class="empty-state">No classes yet. Add your first class!</div>';
                 return;
             }
-            
+
             classList.innerHTML = classes.map(c => `
                 <div class="class-item">
                     <div class="class-info">
@@ -1187,15 +1216,14 @@
 
         function renderLectures() {
             const tbody = document.getElementById('lectureTableBody');
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
-            if (monthLectures.length === 0) {
+
+            if (lectures.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No lectures this month</td></tr>';
                 return;
             }
-            
-            const sortedLectures = [...monthLectures].sort((a, b) => new Date(b.date) - new Date(a.date));
-            
+
+            const sortedLectures = [...lectures].sort((a, b) => new Date(b.date) - new Date(a.date));
+
             tbody.innerHTML = sortedLectures.map(l => `
                 <tr>
                     <td>${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}</td>
@@ -1218,15 +1246,14 @@
 
         function renderPayments() {
             const tbody = document.getElementById('paymentsTableBody');
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
-            if (monthLectures.length === 0) {
+
+            if (lectures.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No payment records this month</td></tr>';
                 return;
             }
-            
-            const sortedLectures = [...monthLectures].sort((a, b) => new Date(b.date) - new Date(a.date));
-            
+
+            const sortedLectures = [...lectures].sort((a, b) => new Date(b.date) - new Date(a.date));
+
             tbody.innerHTML = sortedLectures.map(l => `
                 <tr>
                     <td>${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}</td>
@@ -1246,27 +1273,34 @@
 
         function updateClassDropdown() {
             const select = document.getElementById('lectureClass');
-            select.innerHTML = '<option value="">Choose a class</option>' + 
+            select.innerHTML = '<option value="">Choose a class</option>' +
                 classes.map(c => `<option value="${c.id}">${c.name} (₹${c.hourlyRate}/hr)</option>`).join('');
         }
 
-        function togglePayment(id) {
-            const lecture = lectures.find(l => l.id === id);
-            lecture.paid = !lecture.paid;
-            saveData();
+        async function togglePayment(id) {
+            try {
+                await api(`/api/lectures?id=${id}`, { method: 'PUT' });
+            } catch (err) {
+                alert('Failed to update payment: ' + err.message);
+                return;
+            }
+            await loadData();
             updateStats();
             renderDashboard();
             renderLectures();
             renderPayments();
         }
 
-        function deleteClass(id) {
+        async function deleteClass(id) {
             if (!confirm('Delete this class and all its lectures?')) return;
-            
-            classes = classes.filter(c => c.id !== id);
-            lectures = lectures.filter(l => l.classId !== id);
-            
-            saveData();
+
+            try {
+                await api(`/api/classes?id=${id}`, { method: 'DELETE' });
+            } catch (err) {
+                alert('Failed to delete class: ' + err.message);
+                return;
+            }
+            await loadData();
             updateStats();
             renderDashboard();
             renderClasses();
@@ -1275,21 +1309,16 @@
             updateClassDropdown();
         }
 
-        function deleteLecture(id) {
+        async function deleteLecture(id) {
             if (!confirm('Delete this lecture?')) return;
-            
-            const lecture = lectures.find(l => l.id === id);
-            const classObj = classes.find(c => c.id === lecture.classId);
-            
-            if (classObj) {
-                classObj.totalHours -= lecture.duration;
-                classObj.totalEarnings -= lecture.earnings;
-                classObj.lectureCount -= 1;
+
+            try {
+                await api(`/api/lectures?id=${id}`, { method: 'DELETE' });
+            } catch (err) {
+                alert('Failed to delete lecture: ' + err.message);
+                return;
             }
-            
-            lectures = lectures.filter(l => l.id !== id);
-            
-            saveData();
+            await loadData();
             updateStats();
             renderDashboard();
             renderClasses();
@@ -1300,7 +1329,7 @@
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            
+
             event.target.classList.add('active');
             document.getElementById(tab + 'Tab').classList.add('active');
         }
