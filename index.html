@@ -57,6 +57,58 @@
             z-index: 1;
         }
 
+        /* Config Notice */
+        .config-notice {
+            background: var(--yellow);
+            color: var(--bg-dark);
+            padding: 15px 20px;
+            border-radius: 12px;
+            margin-bottom: 30px;
+            font-family: 'Space Mono', monospace;
+            font-size: 0.9em;
+            display: none;
+        }
+
+        .config-notice.show {
+            display: block;
+        }
+
+        .config-notice strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        /* Loading Overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 15, 15, 0.9);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+
+        .loading-overlay.show {
+            display: flex;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
         header {
             margin-bottom: 50px;
             animation: fadeInDown 0.6s ease;
@@ -280,6 +332,12 @@
 
         button:active {
             transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
         }
 
         .secondary-btn {
@@ -717,11 +775,16 @@
 </head>
 <body>
     <div class="background-pattern"></div>
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="spinner"></div>
+    </div>
     
     <div class="container">
+        
+
         <header>
             <h1>TeachTrack</h1>
-            <p class="subtitle">Your teaching hours, earnings & payments in one place</p>
+            <p class="subtitle">Your teaching hours, earnings & payments — Synced with Google Sheets</p>
         </header>
 
         <div class="month-selector">
@@ -909,25 +972,39 @@
     </div>
 
     <script>
+        // ==========================================
+        // CONFIGURATION - UPDATE THIS!
+        // ==========================================
+        const API_URL = 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec';
+        // Get this URL after deploying your Apps Script as a web app
+        // Example: https://script.google.com/macros/s/AKfycbxxx.../exec
+        
+        // ==========================================
+        // DATA & STATE
+        // ==========================================
         let classes = [];
         let lectures = [];
         let currentMonth = new Date();
 
-        function loadData() {
-            const savedClasses = localStorage.getItem('teacherClasses');
-            const savedLectures = localStorage.getItem('teacherLectures');
+        // ==========================================
+        // INITIALIZATION
+        // ==========================================
+        async function init() {
+            // Check if API URL is configured
+            if (API_URL === 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec') {
+                document.getElementById('configNotice').classList.add('show');
+            }
+
+            showLoading();
             
-            if (savedClasses) classes = JSON.parse(savedClasses);
-            if (savedLectures) lectures = JSON.parse(savedLectures);
-        }
-
-        function saveData() {
-            localStorage.setItem('teacherClasses', JSON.stringify(classes));
-            localStorage.setItem('teacherLectures', JSON.stringify(lectures));
-        }
-
-        function init() {
-            loadData();
+            try {
+                await loadDataFromSheets();
+            } catch (error) {
+                console.error('Failed to load from sheets:', error);
+                // Fallback to localStorage
+                loadDataFromLocal();
+            }
+            
             updateMonthDisplay();
             updateStats();
             renderDashboard();
@@ -937,6 +1014,145 @@
             updateClassDropdown();
             
             document.getElementById('lectureDate').valueAsDate = new Date();
+            hideLoading();
+        }
+
+        // ==========================================
+        // GOOGLE SHEETS API CALLS
+        // ==========================================
+        async function loadDataFromSheets() {
+            try {
+                // Load classes
+                const classesResponse = await fetch(`${API_URL}?action=getClasses`);
+                const classesData = await classesResponse.json();
+                if (classesData.success) {
+                    classes = classesData.classes;
+                }
+
+                // Load lectures
+                const lecturesResponse = await fetch(`${API_URL}?action=getLectures`);
+                const lecturesData = await lecturesResponse.json();
+                if (lecturesData.success) {
+                    lectures = lecturesData.lectures;
+                }
+
+                // Save to localStorage as backup
+                saveDataToLocal();
+            } catch (error) {
+                throw new Error('Failed to load data: ' + error.message);
+            }
+        }
+
+        async function saveClassToSheets(classData) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'saveClass',
+                    name: classData.name,
+                    hourlyRate: classData.hourlyRate
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to save class');
+            }
+            return result.class;
+        }
+
+        async function saveLectureToSheets(lectureData) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'saveLecture',
+                    ...lectureData
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to save lecture');
+            }
+            return result.lecture;
+        }
+
+        async function updatePaymentInSheets(lectureId, paid) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'updatePayment',
+                    lectureId: lectureId,
+                    paid: paid
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to update payment');
+            }
+            return result.lecture;
+        }
+
+        async function deleteClassFromSheets(classId) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'deleteClass',
+                    classId: classId
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to delete class');
+            }
+        }
+
+        async function deleteLectureFromSheets(lectureId) {
+            const response = await fetch(API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'deleteLecture',
+                    lectureId: lectureId
+                })
+            });
+            
+            const result = await response.json();
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to delete lecture');
+            }
+        }
+
+        // ==========================================
+        // LOCAL STORAGE (Backup/Fallback)
+        // ==========================================
+        function loadDataFromLocal() {
+            const savedClasses = localStorage.getItem('teacherClasses');
+            const savedLectures = localStorage.getItem('teacherLectures');
+            
+            if (savedClasses) classes = JSON.parse(savedClasses);
+            if (savedLectures) lectures = JSON.parse(savedLectures);
+        }
+
+        function saveDataToLocal() {
+            localStorage.setItem('teacherClasses', JSON.stringify(classes));
+            localStorage.setItem('teacherLectures', JSON.stringify(lectures));
+        }
+
+        // ==========================================
+        // UI HELPERS
+        // ==========================================
+        function showLoading() {
+            document.getElementById('loadingOverlay').classList.add('show');
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.remove('show');
         }
 
         function changeMonth(delta) {
@@ -970,72 +1186,101 @@
                    date.getFullYear() === currentMonth.getFullYear();
         }
 
-        document.getElementById('classForm').addEventListener('submit', (e) => {
+        // ==========================================
+        // FORM HANDLERS
+        // ==========================================
+        document.getElementById('classForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            showLoading();
             
-            const className = document.getElementById('className').value;
-            const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
-            
-            const newClass = {
-                id: Date.now(),
-                name: className,
-                hourlyRate: hourlyRate,
-                totalHours: 0,
-                totalEarnings: 0,
-                lectureCount: 0
-            };
-            
-            classes.push(newClass);
-            saveData();
-            
-            document.getElementById('classForm').reset();
-            renderClasses();
-            updateClassDropdown();
+            try {
+                const className = document.getElementById('className').value;
+                const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
+                
+                const savedClass = await saveClassToSheets({
+                    name: className,
+                    hourlyRate: hourlyRate
+                });
+                
+                // Add to local array
+                classes.push({
+                    id: savedClass.id,
+                    name: savedClass.name,
+                    hourlyRate: savedClass.hourlyRate,
+                    totalHours: 0,
+                    totalEarnings: 0,
+                    lectureCount: 0
+                });
+                
+                saveDataToLocal();
+                document.getElementById('classForm').reset();
+                renderClasses();
+                updateClassDropdown();
+                
+                hideLoading();
+                alert('✅ Class added successfully!');
+            } catch (error) {
+                hideLoading();
+                alert('❌ Error: ' + error.message);
+            }
         });
 
-        document.getElementById('lectureForm').addEventListener('submit', (e) => {
+        document.getElementById('lectureForm').addEventListener('submit', async (e) => {
             e.preventDefault();
+            showLoading();
             
-            const classId = parseInt(document.getElementById('lectureClass').value);
-            const date = document.getElementById('lectureDate').value;
-            const duration = parseFloat(document.getElementById('lectureDuration').value);
-            const topic = document.getElementById('lectureTopic').value;
-            const paid = document.getElementById('lecturePaid').checked;
-            
-            const selectedClass = classes.find(c => c.id === classId);
-            const earnings = duration * selectedClass.hourlyRate;
-            
-            const newLecture = {
-                id: Date.now(),
-                classId: classId,
-                className: selectedClass.name,
-                date: date,
-                duration: duration,
-                topic: topic,
-                earnings: earnings,
-                hourlyRate: selectedClass.hourlyRate,
-                paid: paid
-            };
-            
-            lectures.push(newLecture);
-            
-            selectedClass.totalHours += duration;
-            selectedClass.totalEarnings += earnings;
-            selectedClass.lectureCount += 1;
-            
-            saveData();
-            
-            document.getElementById('lectureDuration').value = '';
-            document.getElementById('lectureTopic').value = '';
-            document.getElementById('lecturePaid').checked = false;
-            
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
+            try {
+                const classId = parseInt(document.getElementById('lectureClass').value);
+                const date = document.getElementById('lectureDate').value;
+                const duration = parseFloat(document.getElementById('lectureDuration').value);
+                const topic = document.getElementById('lectureTopic').value;
+                const paid = document.getElementById('lecturePaid').checked;
+                
+                const selectedClass = classes.find(c => c.id === classId);
+                const earnings = duration * selectedClass.hourlyRate;
+                
+                const savedLecture = await saveLectureToSheets({
+                    classId: classId,
+                    className: selectedClass.name,
+                    date: date,
+                    duration: duration,
+                    topic: topic,
+                    earnings: earnings,
+                    hourlyRate: selectedClass.hourlyRate,
+                    paid: paid
+                });
+                
+                // Add to local array
+                lectures.push(savedLecture);
+                
+                // Update class totals
+                selectedClass.totalHours += duration;
+                selectedClass.totalEarnings += earnings;
+                selectedClass.lectureCount += 1;
+                
+                saveDataToLocal();
+                
+                document.getElementById('lectureDuration').value = '';
+                document.getElementById('lectureTopic').value = '';
+                document.getElementById('lecturePaid').checked = false;
+                
+                updateStats();
+                renderDashboard();
+                renderClasses();
+                renderLectures();
+                renderPayments();
+                
+                hideLoading();
+                alert('✅ Lecture logged successfully!');
+            } catch (error) {
+                hideLoading();
+                alert('❌ Error: ' + error.message);
+            }
         });
 
+        // ==========================================
+        // STATISTICS
+        // ==========================================
         function updateStats() {
             const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
             
@@ -1162,6 +1407,9 @@
             }
         }
 
+        // ==========================================
+        // RENDER FUNCTIONS
+        // ==========================================
         function renderClasses() {
             const classList = document.getElementById('classList');
             
@@ -1250,51 +1498,90 @@
                 classes.map(c => `<option value="${c.id}">${c.name} (₹${c.hourlyRate}/hr)</option>`).join('');
         }
 
-        function togglePayment(id) {
-            const lecture = lectures.find(l => l.id === id);
-            lecture.paid = !lecture.paid;
-            saveData();
-            updateStats();
-            renderDashboard();
-            renderLectures();
-            renderPayments();
+        // ==========================================
+        // ACTION HANDLERS
+        // ==========================================
+        async function togglePayment(id) {
+            showLoading();
+            
+            try {
+                const lecture = lectures.find(l => l.id === id);
+                const newPaidStatus = !lecture.paid;
+                
+                await updatePaymentInSheets(id, newPaidStatus);
+                
+                lecture.paid = newPaidStatus;
+                saveDataToLocal();
+                
+                updateStats();
+                renderDashboard();
+                renderLectures();
+                renderPayments();
+                
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('❌ Error: ' + error.message);
+            }
         }
 
-        function deleteClass(id) {
+        async function deleteClass(id) {
             if (!confirm('Delete this class and all its lectures?')) return;
             
-            classes = classes.filter(c => c.id !== id);
-            lectures = lectures.filter(l => l.classId !== id);
+            showLoading();
             
-            saveData();
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
-            updateClassDropdown();
+            try {
+                await deleteClassFromSheets(id);
+                
+                classes = classes.filter(c => c.id !== id);
+                lectures = lectures.filter(l => l.classId !== id);
+                
+                saveDataToLocal();
+                updateStats();
+                renderDashboard();
+                renderClasses();
+                renderLectures();
+                renderPayments();
+                updateClassDropdown();
+                
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('❌ Error: ' + error.message);
+            }
         }
 
-        function deleteLecture(id) {
+        async function deleteLecture(id) {
             if (!confirm('Delete this lecture?')) return;
             
-            const lecture = lectures.find(l => l.id === id);
-            const classObj = classes.find(c => c.id === lecture.classId);
+            showLoading();
             
-            if (classObj) {
-                classObj.totalHours -= lecture.duration;
-                classObj.totalEarnings -= lecture.earnings;
-                classObj.lectureCount -= 1;
+            try {
+                await deleteLectureFromSheets(id);
+                
+                const lecture = lectures.find(l => l.id === id);
+                const classObj = classes.find(c => c.id === lecture.classId);
+                
+                if (classObj) {
+                    classObj.totalHours -= lecture.duration;
+                    classObj.totalEarnings -= lecture.earnings;
+                    classObj.lectureCount -= 1;
+                }
+                
+                lectures = lectures.filter(l => l.id !== id);
+                
+                saveDataToLocal();
+                updateStats();
+                renderDashboard();
+                renderClasses();
+                renderLectures();
+                renderPayments();
+                
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('❌ Error: ' + error.message);
             }
-            
-            lectures = lectures.filter(l => l.id !== id);
-            
-            saveData();
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
         }
 
         function switchTab(tab) {
@@ -1305,6 +1592,7 @@
             document.getElementById(tab + 'Tab').classList.add('active');
         }
 
+        // Initialize app
         init();
     </script>
 </body>
