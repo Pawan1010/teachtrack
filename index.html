@@ -780,7 +780,10 @@
     </div>
     
     <div class="container">
-        
+        <div class="config-notice" id="configNotice">
+            <strong>⚙️ Configuration Required</strong>
+            Please update the API_URL in the script section with your Google Apps Script URL
+        </div>
 
         <header>
             <h1>TeachTrack</h1>
@@ -975,7 +978,7 @@
         // ==========================================
         // CONFIGURATION - UPDATE THIS!
         // ==========================================
-        const API_URL = 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec';
+        const API_URL = 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE';
         // Get this URL after deploying your Apps Script as a web app
         // Example: https://script.google.com/macros/s/AKfycbxxx.../exec
         
@@ -991,7 +994,7 @@
         // ==========================================
         async function init() {
             // Check if API URL is configured
-            if (API_URL === 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec') {
+            if (API_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
                 document.getElementById('configNotice').classList.add('show');
             }
 
@@ -1001,6 +1004,7 @@
                 await loadDataFromSheets();
             } catch (error) {
                 console.error('Failed to load from sheets:', error);
+                alert('Error loading data: ' + error.message + '\n\nCheck browser console (F12) for details.');
                 // Fallback to localStorage
                 loadDataFromLocal();
             }
@@ -1022,23 +1026,42 @@
         // ==========================================
         async function loadDataFromSheets() {
             try {
+                console.log('Loading data from Google Sheets...');
+                console.log('API URL:', API_URL);
+                
                 // Load classes
-                const classesResponse = await fetch(`${API_URL}?action=getClasses`);
+                const classesUrl = `${API_URL}?action=getClasses`;
+                console.log('Fetching classes from:', classesUrl);
+                const classesResponse = await fetch(classesUrl);
+                console.log('Classes response status:', classesResponse.status);
+                
                 const classesData = await classesResponse.json();
+                console.log('Classes data:', classesData);
+                
                 if (classesData.success) {
                     classes = classesData.classes;
+                    console.log('Loaded', classes.length, 'classes');
                 }
 
                 // Load lectures
-                const lecturesResponse = await fetch(`${API_URL}?action=getLectures`);
+                const lecturesUrl = `${API_URL}?action=getLectures`;
+                console.log('Fetching lectures from:', lecturesUrl);
+                const lecturesResponse = await fetch(lecturesUrl);
+                console.log('Lectures response status:', lecturesResponse.status);
+                
                 const lecturesData = await lecturesResponse.json();
+                console.log('Lectures data:', lecturesData);
+                
                 if (lecturesData.success) {
                     lectures = lecturesData.lectures;
+                    console.log('Loaded', lectures.length, 'lectures');
                 }
 
                 // Save to localStorage as backup
                 saveDataToLocal();
+                console.log('Data loaded successfully!');
             } catch (error) {
+                console.error('Error details:', error);
                 throw new Error('Failed to load data: ' + error.message);
             }
         }
