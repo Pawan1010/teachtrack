@@ -973,209 +973,182 @@
             </div>
         </div>
     </div>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <script>
-        // ==========================================
-        // CONFIGURATION - UPDATE THIS!
-        // ==========================================
-        const API_URL = 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec';
-        // Get this URL after deploying your Apps Script as a web app
-        // Example: https://script.google.com/macros/s/AKfycbxxx.../exec
-        
-        // ==========================================
-        // DATA & STATE
-        // ==========================================
+        // FIREBASE CONFIGURATION
+        const firebaseConfig = {
+            apiKey: "AIzaSyD92NVcVE53r01n_AymBG13GnkryMXELQs",
+            authDomain: "teachtrack-8339a.firebaseapp.com",
+            projectId: "teachtrack-8339a",
+            storageBucket: "teachtrack-8339a.firebasestorage.app",
+            messagingSenderId: "767216427497",
+            appId: "1:767216427497:web:61992ac78ae47f45626b78"
+        };
+
+        // Initialize Firebase
+        let db;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.firestore();
+            
+            // Enable offline persistence for mobile
+            db.enablePersistence()
+                .catch((err) => {
+                    if (err.code == 'failed-precondition') {
+                        console.log('Multiple tabs open');
+                    } else if (err.code == 'unimplemented') {
+                        console.log('Browser doesn\'t support offline');
+                    }
+                });
+            
+            console.log('🔥 Firebase connected!');
+        } catch (error) {
+            console.error('Firebase error:', error);
+        }
+
         let classes = [];
         let lectures = [];
         let currentMonth = new Date();
 
-        // ==========================================
-        // INITIALIZATION
-        // ==========================================
-        async function init() {
-            // Check if API URL is configured
-            if (API_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
-                document.getElementById('configNotice').classList.add('show');
-            }
+        // Real-time listeners
+        function setupListeners() {
+            db.collection('classes').onSnapshot((snapshot) => {
+                classes = [];
+                snapshot.forEach((doc) => {
+                    classes.push({ id: doc.id, ...doc.data(), totalHours: 0, totalEarnings: 0, lectureCount: 0 });
+                });
+                calculateTotals();
+                renderClasses();
+                updateClassDropdown();
+                updateStats();
+                renderDashboard();
+            });
 
-            showLoading();
-            
-            try {
-                await loadDataFromSheets();
-            } catch (error) {
-                console.error('Failed to load from sheets:', error);
-                alert('Error loading data: ' + error.message + '\n\nCheck browser console (F12) for details.');
-                // Fallback to localStorage
-                loadDataFromLocal();
-            }
-            
+            db.collection('lectures').orderBy('date', 'desc').onSnapshot((snapshot) => {
+                lectures = [];
+                snapshot.forEach((doc) => {
+                    lectures.push({ id: doc.id, ...doc.data() });
+                });
+                calculateTotals();
+                renderLectures();
+                renderPayments();
+                updateStats();
+                renderDashboard();
+            });
+        }
+
+        function calculateTotals() {
+            classes.forEach(c => { c.totalHours = 0; c.totalEarnings = 0; c.lectureCount = 0; });
+            lectures.forEach(l => {
+                const c = classes.find(x => x.id === l.classId);
+                if (c) {
+                    c.totalHours += l.duration || 0;
+                    c.totalEarnings += l.earnings || 0;
+                    c.lectureCount += 1;
+                }
+            });
+        }
+
+        function showLoading() { document.getElementById('loadingOverlay').classList.add('show'); }
+        function hideLoading() { document.getElementById('loadingOverlay').classList.remove('show'); }
+
+        function init() {
+            setupListeners();
             updateMonthDisplay();
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
-            updateClassDropdown();
-            
             document.getElementById('lectureDate').valueAsDate = new Date();
             hideLoading();
         }
 
-        // ==========================================
-        // GOOGLE SHEETS API CALLS
-        // ==========================================
-        async function loadDataFromSheets() {
+        // Form handlers
+        document.getElementById('classForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
             try {
-                console.log('Loading data from Google Sheets...');
-                console.log('API URL:', API_URL);
-                
-                // Load classes
-                const classesUrl = `${API_URL}?action=getClasses`;
-                console.log('Fetching classes from:', classesUrl);
-                const classesResponse = await fetch(classesUrl);
-                console.log('Classes response status:', classesResponse.status);
-                
-                const classesData = await classesResponse.json();
-                console.log('Classes data:', classesData);
-                
-                if (classesData.success) {
-                    classes = classesData.classes;
-                    console.log('Loaded', classes.length, 'classes');
-                }
-
-                // Load lectures
-                const lecturesUrl = `${API_URL}?action=getLectures`;
-                console.log('Fetching lectures from:', lecturesUrl);
-                const lecturesResponse = await fetch(lecturesUrl);
-                console.log('Lectures response status:', lecturesResponse.status);
-                
-                const lecturesData = await lecturesResponse.json();
-                console.log('Lectures data:', lecturesData);
-                
-                if (lecturesData.success) {
-                    lectures = lecturesData.lectures;
-                    console.log('Loaded', lectures.length, 'lectures');
-                }
-
-                // Save to localStorage as backup
-                saveDataToLocal();
-                console.log('Data loaded successfully!');
+                await db.collection('classes').add({
+                    name: document.getElementById('className').value,
+                    hourlyRate: parseFloat(document.getElementById('hourlyRate').value),
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                document.getElementById('classForm').reset();
+                hideLoading();
             } catch (error) {
-                console.error('Error details:', error);
-                throw new Error('Failed to load data: ' + error.message);
+                hideLoading();
+                alert('Error: ' + error.message);
+            }
+        });
+
+        document.getElementById('lectureForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            showLoading();
+            try {
+                const classId = document.getElementById('lectureClass').value;
+                const selectedClass = classes.find(c => c.id === classId);
+                const duration = parseFloat(document.getElementById('lectureDuration').value);
+                
+                await db.collection('lectures').add({
+                    classId: classId,
+                    className: selectedClass.name,
+                    date: document.getElementById('lectureDate').value,
+                    duration: duration,
+                    topic: document.getElementById('lectureTopic').value,
+                    earnings: duration * selectedClass.hourlyRate,
+                    hourlyRate: selectedClass.hourlyRate,
+                    paid: document.getElementById('lecturePaid').checked,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+                
+                document.getElementById('lectureDuration').value = '';
+                document.getElementById('lectureTopic').value = '';
+                document.getElementById('lecturePaid').checked = false;
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('Error: ' + error.message);
+            }
+        });
+
+        async function togglePayment(id, newStatus) {
+            showLoading();
+            try {
+                await db.collection('lectures').doc(id).update({ paid: newStatus });
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('Error: ' + error.message);
             }
         }
 
-        async function saveClassToSheets(classData) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveClass',
-                    name: classData.name,
-                    hourlyRate: classData.hourlyRate
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to save class');
-            }
-            return result.class;
-        }
-
-        async function saveLectureToSheets(lectureData) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveLecture',
-                    ...lectureData
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to save lecture');
-            }
-            return result.lecture;
-        }
-
-        async function updatePaymentInSheets(lectureId, paid) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'updatePayment',
-                    lectureId: lectureId,
-                    paid: paid
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to update payment');
-            }
-            return result.lecture;
-        }
-
-        async function deleteClassFromSheets(classId) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'deleteClass',
-                    classId: classId
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to delete class');
+        async function deleteClass(id) {
+            if (!confirm('Delete class and all lectures?')) return;
+            showLoading();
+            try {
+                await db.collection('classes').doc(id).delete();
+                const batch = db.batch();
+                const snapshot = await db.collection('lectures').where('classId', '==', id).get();
+                snapshot.forEach(doc => batch.delete(doc.ref));
+                await batch.commit();
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('Error: ' + error.message);
             }
         }
 
-        async function deleteLectureFromSheets(lectureId) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'deleteLecture',
-                    lectureId: lectureId
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to delete lecture');
+        async function deleteLecture(id) {
+            if (!confirm('Delete lecture?')) return;
+            showLoading();
+            try {
+                await db.collection('lectures').doc(id).delete();
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                alert('Error: ' + error.message);
             }
-        }
-
-        // ==========================================
-        // LOCAL STORAGE (Backup/Fallback)
-        // ==========================================
-        function loadDataFromLocal() {
-            const savedClasses = localStorage.getItem('teacherClasses');
-            const savedLectures = localStorage.getItem('teacherLectures');
-            
-            if (savedClasses) classes = JSON.parse(savedClasses);
-            if (savedLectures) lectures = JSON.parse(savedLectures);
-        }
-
-        function saveDataToLocal() {
-            localStorage.setItem('teacherClasses', JSON.stringify(classes));
-            localStorage.setItem('teacherLectures', JSON.stringify(lectures));
-        }
-
-        // ==========================================
-        // UI HELPERS
-        // ==========================================
-        function showLoading() {
-            document.getElementById('loadingOverlay').classList.add('show');
-        }
-
-        function hideLoading() {
-            document.getElementById('loadingOverlay').classList.remove('show');
         }
 
         function changeMonth(delta) {
@@ -1197,426 +1170,177 @@
         }
 
         function updateMonthDisplay() {
-            const monthNames = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
-            document.getElementById('currentMonth').textContent = 
-                `${monthNames[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
+            const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            document.getElementById('currentMonth').textContent = `${months[currentMonth.getMonth()]} ${currentMonth.getFullYear()}`;
         }
 
-        function isInCurrentMonth(dateString) {
-            const date = new Date(dateString);
-            return date.getMonth() === currentMonth.getMonth() && 
-                   date.getFullYear() === currentMonth.getFullYear();
+        function isInCurrentMonth(dateStr) {
+            const d = new Date(dateStr);
+            return d.getMonth() === currentMonth.getMonth() && d.getFullYear() === currentMonth.getFullYear();
         }
 
-        // ==========================================
-        // FORM HANDLERS
-        // ==========================================
-        document.getElementById('classForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            showLoading();
-            
-            try {
-                const className = document.getElementById('className').value;
-                const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
-                
-                const savedClass = await saveClassToSheets({
-                    name: className,
-                    hourlyRate: hourlyRate
-                });
-                
-                // Add to local array
-                classes.push({
-                    id: savedClass.id,
-                    name: savedClass.name,
-                    hourlyRate: savedClass.hourlyRate,
-                    totalHours: 0,
-                    totalEarnings: 0,
-                    lectureCount: 0
-                });
-                
-                saveDataToLocal();
-                document.getElementById('classForm').reset();
-                renderClasses();
-                updateClassDropdown();
-                
-                hideLoading();
-                alert('✅ Class added successfully!');
-            } catch (error) {
-                hideLoading();
-                alert('❌ Error: ' + error.message);
-            }
-        });
-
-        document.getElementById('lectureForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            showLoading();
-            
-            try {
-                const classId = parseInt(document.getElementById('lectureClass').value);
-                const date = document.getElementById('lectureDate').value;
-                const duration = parseFloat(document.getElementById('lectureDuration').value);
-                const topic = document.getElementById('lectureTopic').value;
-                const paid = document.getElementById('lecturePaid').checked;
-                
-                const selectedClass = classes.find(c => c.id === classId);
-                const earnings = duration * selectedClass.hourlyRate;
-                
-                const savedLecture = await saveLectureToSheets({
-                    classId: classId,
-                    className: selectedClass.name,
-                    date: date,
-                    duration: duration,
-                    topic: topic,
-                    earnings: earnings,
-                    hourlyRate: selectedClass.hourlyRate,
-                    paid: paid
-                });
-                
-                // Add to local array
-                lectures.push(savedLecture);
-                
-                // Update class totals
-                selectedClass.totalHours += duration;
-                selectedClass.totalEarnings += earnings;
-                selectedClass.lectureCount += 1;
-                
-                saveDataToLocal();
-                
-                document.getElementById('lectureDuration').value = '';
-                document.getElementById('lectureTopic').value = '';
-                document.getElementById('lecturePaid').checked = false;
-                
-                updateStats();
-                renderDashboard();
-                renderClasses();
-                renderLectures();
-                renderPayments();
-                
-                hideLoading();
-                alert('✅ Lecture logged successfully!');
-            } catch (error) {
-                hideLoading();
-                alert('❌ Error: ' + error.message);
-            }
-        });
-
-        // ==========================================
-        // STATISTICS
-        // ==========================================
         function updateStats() {
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
+            const ml = lectures.filter(l => isInCurrentMonth(l.date));
+            const total = ml.reduce((s,l) => s + l.earnings, 0);
+            const paid = ml.filter(l => l.paid).reduce((s,l) => s + l.earnings, 0);
+            const hours = ml.reduce((s,l) => s + l.duration, 0);
             
-            const monthlyEarnings = monthLectures.reduce((sum, l) => sum + l.earnings, 0);
-            const paidEarnings = monthLectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
-            const pendingEarnings = monthlyEarnings - paidEarnings;
-            const monthlyHours = monthLectures.reduce((sum, l) => sum + l.duration, 0);
-            
-            document.getElementById('monthlyEarnings').textContent = '₹' + monthlyEarnings.toLocaleString('en-IN');
-            document.getElementById('paidAmount').textContent = '₹' + paidEarnings.toLocaleString('en-IN');
-            document.getElementById('pendingAmount').textContent = '₹' + pendingEarnings.toLocaleString('en-IN');
-            document.getElementById('monthlyHours').textContent = monthlyHours.toFixed(1);
-            
-            const lectureCount = monthLectures.length;
-            document.getElementById('earningsTrend').textContent = `${lectureCount} lectures`;
+            document.getElementById('monthlyEarnings').textContent = '₹' + total.toLocaleString('en-IN');
+            document.getElementById('paidAmount').textContent = '₹' + paid.toLocaleString('en-IN');
+            document.getElementById('pendingAmount').textContent = '₹' + (total-paid).toLocaleString('en-IN');
+            document.getElementById('monthlyHours').textContent = hours.toFixed(1);
+            document.getElementById('earningsTrend').textContent = `${ml.length} lectures`;
         }
 
         function renderDashboard() {
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
+            const ml = lectures.filter(l => isInCurrentMonth(l.date));
+            const total = ml.reduce((s,l) => s + l.duration, 0);
             
-            // Overview stats
-            const totalLectures = monthLectures.length;
-            const totalHours = monthLectures.reduce((sum, l) => sum + l.duration, 0);
-            const avgHours = totalLectures > 0 ? totalHours / totalLectures : 0;
+            document.getElementById('dashLectures').textContent = ml.length;
+            document.getElementById('dashHours').textContent = total.toFixed(1) + 'h';
+            document.getElementById('dashAvg').textContent = (ml.length ? (total/ml.length).toFixed(1) : 0) + 'h';
             
-            document.getElementById('dashLectures').textContent = totalLectures;
-            document.getElementById('dashHours').textContent = totalHours.toFixed(1) + 'h';
-            document.getElementById('dashAvg').textContent = avgHours.toFixed(1) + 'h';
+            const totalE = ml.reduce((s,l) => s + l.earnings, 0);
+            const paidE = ml.filter(l => l.paid).reduce((s,l) => s + l.earnings, 0);
+            const pct = totalE > 0 ? (paidE/totalE*100) : 0;
             
-            // Payment progress
-            const totalEarnings = monthLectures.reduce((sum, l) => sum + l.earnings, 0);
-            const paidEarnings = monthLectures.filter(l => l.paid).reduce((sum, l) => sum + l.earnings, 0);
-            const paymentPercent = totalEarnings > 0 ? (paidEarnings / totalEarnings * 100) : 0;
+            const pf = document.getElementById('paymentProgress');
+            pf.style.width = pct + '%';
+            pf.textContent = pct >= 20 ? Math.round(pct) + '%' : '';
+            document.getElementById('paymentPercent').textContent = Math.round(pct) + '% Paid';
+            document.getElementById('paymentRatio').textContent = `₹${paidE.toLocaleString('en-IN')} / ₹${totalE.toLocaleString('en-IN')}`;
             
-            const progressFill = document.getElementById('paymentProgress');
-            progressFill.style.width = paymentPercent + '%';
-            progressFill.textContent = paymentPercent >= 20 ? Math.round(paymentPercent) + '%' : '';
-            
-            document.getElementById('paymentPercent').textContent = Math.round(paymentPercent) + '% Paid';
-            document.getElementById('paymentRatio').textContent = 
-                `₹${paidEarnings.toLocaleString('en-IN')} / ₹${totalEarnings.toLocaleString('en-IN')}`;
-            
-            // Earnings by class
-            const classTotals = {};
-            let maxEarnings = 0;
-            
-            monthLectures.forEach(l => {
-                if (!classTotals[l.className]) {
-                    classTotals[l.className] = { earnings: 0, hours: 0, count: 0 };
-                }
-                classTotals[l.className].earnings += l.earnings;
-                classTotals[l.className].hours += l.duration;
-                classTotals[l.className].count += 1;
-                maxEarnings = Math.max(maxEarnings, classTotals[l.className].earnings);
+            // Class breakdown
+            const ct = {};
+            let max = 0;
+            ml.forEach(l => {
+                if (!ct[l.className]) ct[l.className] = {earnings:0, hours:0, count:0};
+                ct[l.className].earnings += l.earnings;
+                ct[l.className].hours += l.duration;
+                ct[l.className].count += 1;
+                max = Math.max(max, ct[l.className].earnings);
             });
             
-            const classBreakdown = document.getElementById('classBreakdown');
-            if (Object.keys(classTotals).length === 0) {
-                classBreakdown.innerHTML = '<div class="empty-state" style="padding: 20px;">No data for this month</div>';
+            const cb = document.getElementById('classBreakdown');
+            if (Object.keys(ct).length === 0) {
+                cb.innerHTML = '<div class="empty-state" style="padding:20px">No data this month</div>';
             } else {
-                const sortedClasses = Object.entries(classTotals)
-                    .sort((a, b) => b[1].earnings - a[1].earnings);
-                
-                classBreakdown.innerHTML = sortedClasses.map(([name, data]) => `
+                cb.innerHTML = Object.entries(ct).sort((a,b)=>b[1].earnings-a[1].earnings).map(([n,d])=>`
                     <div class="class-breakdown-item">
-                        <div class="class-breakdown-name">${name}</div>
-                        <div class="class-breakdown-bar">
-                            <div class="class-breakdown-fill" style="width: ${(data.earnings / maxEarnings * 100)}%"></div>
-                        </div>
-                        <div class="class-breakdown-value">₹${data.earnings.toLocaleString('en-IN')}</div>
+                        <div class="class-breakdown-name">${n}</div>
+                        <div class="class-breakdown-bar"><div class="class-breakdown-fill" style="width:${(d.earnings/max*100)}%"></div></div>
+                        <div class="class-breakdown-value">₹${d.earnings.toLocaleString('en-IN')}</div>
                     </div>
                 `).join('');
             }
             
             // Recent activity
-            const recentActivity = document.getElementById('recentActivity');
-            if (monthLectures.length === 0) {
-                recentActivity.innerHTML = '<div class="empty-state" style="padding: 20px;">No recent activity</div>';
+            const ra = document.getElementById('recentActivity');
+            if (ml.length === 0) {
+                ra.innerHTML = '<div class="empty-state" style="padding:20px">No recent activity</div>';
             } else {
-                const recent = [...monthLectures]
-                    .sort((a, b) => new Date(b.date) - new Date(a.date))
-                    .slice(0, 5);
-                
-                recentActivity.innerHTML = recent.map(l => `
+                ra.innerHTML = [...ml].sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5).map(l=>`
                     <div class="activity-item">
-                        <div class="activity-icon">${l.paid ? '✓' : '⏱'}</div>
+                        <div class="activity-icon">${l.paid?'✓':'⏱'}</div>
                         <div class="activity-details">
                             <div class="activity-title">${l.className}</div>
-                            <div class="activity-meta">
-                                ${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})} 
-                                • ${l.duration}h
-                                ${l.topic ? '• ' + l.topic : ''}
-                            </div>
+                            <div class="activity-meta">${new Date(l.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})} • ${l.duration}h${l.topic?' • '+l.topic:''}</div>
                         </div>
                         <div class="activity-amount">₹${l.earnings.toLocaleString('en-IN')}</div>
                     </div>
                 `).join('');
             }
             
-            // Top earning class
-            const topClass = document.getElementById('topClass');
-            if (Object.keys(classTotals).length === 0) {
-                topClass.innerHTML = '<div class="highlight-icon">🏆</div><div class="highlight-text">No data yet</div>';
+            // Top class
+            const tc = document.getElementById('topClass');
+            if (Object.keys(ct).length === 0) {
+                tc.innerHTML = '<div class="highlight-icon">🏆</div><div class="highlight-text">No data yet</div>';
             } else {
-                const top = Object.entries(classTotals).sort((a, b) => b[1].earnings - a[1].earnings)[0];
-                topClass.innerHTML = `
-                    <div class="highlight-icon">🏆</div>
-                    <div class="highlight-text">${top[0]}</div>
-                    <div class="highlight-subtext">₹${top[1].earnings.toLocaleString('en-IN')} • ${top[1].count} lectures</div>
-                `;
+                const top = Object.entries(ct).sort((a,b)=>b[1].earnings-a[1].earnings)[0];
+                tc.innerHTML = `<div class="highlight-icon">🏆</div><div class="highlight-text">${top[0]}</div><div class="highlight-subtext">₹${top[1].earnings.toLocaleString('en-IN')} • ${top[1].count} lectures</div>`;
             }
             
-            // Most frequent class
-            const mostFrequent = document.getElementById('mostFrequent');
-            if (Object.keys(classTotals).length === 0) {
-                mostFrequent.innerHTML = '<div class="highlight-icon">📚</div><div class="highlight-text">No data yet</div>';
+            // Most frequent
+            const mf = document.getElementById('mostFrequent');
+            if (Object.keys(ct).length === 0) {
+                mf.innerHTML = '<div class="highlight-icon">📚</div><div class="highlight-text">No data yet</div>';
             } else {
-                const frequent = Object.entries(classTotals).sort((a, b) => b[1].count - a[1].count)[0];
-                mostFrequent.innerHTML = `
-                    <div class="highlight-icon">📚</div>
-                    <div class="highlight-text">${frequent[0]}</div>
-                    <div class="highlight-subtext">${frequent[1].count} lectures • ${frequent[1].hours.toFixed(1)}h</div>
-                `;
+                const freq = Object.entries(ct).sort((a,b)=>b[1].count-a[1].count)[0];
+                mf.innerHTML = `<div class="highlight-icon">📚</div><div class="highlight-text">${freq[0]}</div><div class="highlight-subtext">${freq[1].count} lectures • ${freq[1].hours.toFixed(1)}h</div>`;
             }
         }
 
-        // ==========================================
-        // RENDER FUNCTIONS
-        // ==========================================
         function renderClasses() {
-            const classList = document.getElementById('classList');
-            
+            const cl = document.getElementById('classList');
             if (classes.length === 0) {
-                classList.innerHTML = '<div class="empty-state">No classes yet. Add your first class!</div>';
-                return;
-            }
-            
-            classList.innerHTML = classes.map(c => `
-                <div class="class-item">
-                    <div class="class-info">
-                        <h3>${c.name}</h3>
-                        <div class="class-details">
-                            ${c.lectureCount} lectures • ${c.totalHours.toFixed(1)}h • ₹${c.hourlyRate}/hr
-                            <br>
-                            Total: ₹${c.totalEarnings.toLocaleString('en-IN')}
+                cl.innerHTML = '<div class="empty-state">No classes yet. Add your first class!</div>';
+            } else {
+                cl.innerHTML = classes.map(c=>`
+                    <div class="class-item">
+                        <div class="class-info">
+                            <h3>${c.name}</h3>
+                            <div class="class-details">${c.lectureCount} lectures • ${c.totalHours.toFixed(1)}h • ₹${c.hourlyRate}/hr<br>Total: ₹${c.totalEarnings.toLocaleString('en-IN')}</div>
                         </div>
+                        <button class="delete-btn" onclick="deleteClass('${c.id}')">Delete</button>
                     </div>
-                    <button class="delete-btn" onclick="deleteClass(${c.id})">Delete</button>
-                </div>
-            `).join('');
+                `).join('');
+            }
         }
 
         function renderLectures() {
-            const tbody = document.getElementById('lectureTableBody');
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
-            if (monthLectures.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No lectures this month</td></tr>';
-                return;
+            const tb = document.getElementById('lectureTableBody');
+            const ml = lectures.filter(l => isInCurrentMonth(l.date));
+            if (ml.length === 0) {
+                tb.innerHTML = '<tr><td colspan="7" class="empty-state">No lectures this month</td></tr>';
+            } else {
+                tb.innerHTML = [...ml].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(l=>`
+                    <tr>
+                        <td>${new Date(l.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+                        <td><span class="badge">${l.className}</span></td>
+                        <td>${l.topic||'—'}</td>
+                        <td>${l.duration}h</td>
+                        <td>₹${l.earnings.toLocaleString('en-IN')}</td>
+                        <td><span class="payment-badge ${l.paid?'paid':'unpaid'}">${l.paid?'✓ Paid':'⏱ Pending'}</span></td>
+                        <td>
+                            <button class="mini-btn" onclick="togglePayment('${l.id}',${!l.paid})">${l.paid?'Unpay':'Mark Paid'}</button>
+                            <button class="delete-btn" onclick="deleteLecture('${l.id}')" style="margin-left:5px">×</button>
+                        </td>
+                    </tr>
+                `).join('');
             }
-            
-            const sortedLectures = [...monthLectures].sort((a, b) => new Date(b.date) - new Date(a.date));
-            
-            tbody.innerHTML = sortedLectures.map(l => `
-                <tr>
-                    <td>${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}</td>
-                    <td><span class="badge">${l.className}</span></td>
-                    <td>${l.topic || '—'}</td>
-                    <td>${l.duration}h</td>
-                    <td>₹${l.earnings.toLocaleString('en-IN')}</td>
-                    <td>
-                        <span class="payment-badge ${l.paid ? 'paid' : 'unpaid'}">
-                            ${l.paid ? '✓ Paid' : '⏱ Pending'}
-                        </span>
-                    </td>
-                    <td>
-                        <button class="mini-btn" onclick="togglePayment(${l.id})">${l.paid ? 'Unpay' : 'Mark Paid'}</button>
-                        <button class="delete-btn" onclick="deleteLecture(${l.id})" style="margin-left: 5px;">×</button>
-                    </td>
-                </tr>
-            `).join('');
         }
 
         function renderPayments() {
-            const tbody = document.getElementById('paymentsTableBody');
-            const monthLectures = lectures.filter(l => isInCurrentMonth(l.date));
-            
-            if (monthLectures.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="5" class="empty-state">No payment records this month</td></tr>';
-                return;
+            const tb = document.getElementById('paymentsTableBody');
+            const ml = lectures.filter(l => isInCurrentMonth(l.date));
+            if (ml.length === 0) {
+                tb.innerHTML = '<tr><td colspan="5" class="empty-state">No payment records this month</td></tr>';
+            } else {
+                tb.innerHTML = [...ml].sort((a,b)=>new Date(b.date)-new Date(a.date)).map(l=>`
+                    <tr>
+                        <td>${new Date(l.date).toLocaleDateString('en-IN',{day:'numeric',month:'short'})}</td>
+                        <td><span class="badge">${l.className}</span></td>
+                        <td>₹${l.earnings.toLocaleString('en-IN')}</td>
+                        <td><span class="payment-badge ${l.paid?'paid':'unpaid'}">${l.paid?'✓ Paid':'⏱ Pending'}</span></td>
+                        <td><button class="mini-btn" onclick="togglePayment('${l.id}',${!l.paid})">${l.paid?'Unpay':'Mark Paid'}</button></td>
+                    </tr>
+                `).join('');
             }
-            
-            const sortedLectures = [...monthLectures].sort((a, b) => new Date(b.date) - new Date(a.date));
-            
-            tbody.innerHTML = sortedLectures.map(l => `
-                <tr>
-                    <td>${new Date(l.date).toLocaleDateString('en-IN', {day: 'numeric', month: 'short'})}</td>
-                    <td><span class="badge">${l.className}</span></td>
-                    <td>₹${l.earnings.toLocaleString('en-IN')}</td>
-                    <td>
-                        <span class="payment-badge ${l.paid ? 'paid' : 'unpaid'}">
-                            ${l.paid ? '✓ Paid' : '⏱ Pending'}
-                        </span>
-                    </td>
-                    <td>
-                        <button class="mini-btn" onclick="togglePayment(${l.id})">${l.paid ? 'Unpay' : 'Mark Paid'}</button>
-                    </td>
-                </tr>
-            `).join('');
         }
 
         function updateClassDropdown() {
-            const select = document.getElementById('lectureClass');
-            select.innerHTML = '<option value="">Choose a class</option>' + 
-                classes.map(c => `<option value="${c.id}">${c.name} (₹${c.hourlyRate}/hr)</option>`).join('');
-        }
-
-        // ==========================================
-        // ACTION HANDLERS
-        // ==========================================
-        async function togglePayment(id) {
-            showLoading();
-            
-            try {
-                const lecture = lectures.find(l => l.id === id);
-                const newPaidStatus = !lecture.paid;
-                
-                await updatePaymentInSheets(id, newPaidStatus);
-                
-                lecture.paid = newPaidStatus;
-                saveDataToLocal();
-                
-                updateStats();
-                renderDashboard();
-                renderLectures();
-                renderPayments();
-                
-                hideLoading();
-            } catch (error) {
-                hideLoading();
-                alert('❌ Error: ' + error.message);
-            }
-        }
-
-        async function deleteClass(id) {
-            if (!confirm('Delete this class and all its lectures?')) return;
-            
-            showLoading();
-            
-            try {
-                await deleteClassFromSheets(id);
-                
-                classes = classes.filter(c => c.id !== id);
-                lectures = lectures.filter(l => l.classId !== id);
-                
-                saveDataToLocal();
-                updateStats();
-                renderDashboard();
-                renderClasses();
-                renderLectures();
-                renderPayments();
-                updateClassDropdown();
-                
-                hideLoading();
-            } catch (error) {
-                hideLoading();
-                alert('❌ Error: ' + error.message);
-            }
-        }
-
-        async function deleteLecture(id) {
-            if (!confirm('Delete this lecture?')) return;
-            
-            showLoading();
-            
-            try {
-                await deleteLectureFromSheets(id);
-                
-                const lecture = lectures.find(l => l.id === id);
-                const classObj = classes.find(c => c.id === lecture.classId);
-                
-                if (classObj) {
-                    classObj.totalHours -= lecture.duration;
-                    classObj.totalEarnings -= lecture.earnings;
-                    classObj.lectureCount -= 1;
-                }
-                
-                lectures = lectures.filter(l => l.id !== id);
-                
-                saveDataToLocal();
-                updateStats();
-                renderDashboard();
-                renderClasses();
-                renderLectures();
-                renderPayments();
-                
-                hideLoading();
-            } catch (error) {
-                hideLoading();
-                alert('❌ Error: ' + error.message);
-            }
+            const s = document.getElementById('lectureClass');
+            s.innerHTML = '<option value="">Choose a class</option>' + classes.map(c=>`<option value="${c.id}">${c.name} (₹${c.hourlyRate}/hr)</option>`).join('');
         }
 
         function switchTab(tab) {
             document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            
             event.target.classList.add('active');
-            document.getElementById(tab + 'Tab').classList.add('active');
+            document.getElementById(tab+'Tab').classList.add('active');
         }
 
-        // Initialize app
-        init();
+        window.addEventListener('load', init);
     </script>
 </body>
 </html>
