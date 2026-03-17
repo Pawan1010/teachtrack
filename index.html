@@ -1011,7 +1011,11 @@
         }));
             
         classes = classData || [];
-        lectures = lectureData || [];
+        lectures = (lectureData || []).map(l => ({
+            ...l,
+            className: l.class_name, 
+            classId: l.class_id
+            }));
         }
 
        
