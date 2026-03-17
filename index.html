@@ -1016,6 +1016,16 @@
             className: l.class_name, 
             classId: l.class_id
             }));
+        
+        
+        lectures.forEach(l => {
+        const cls = classes.find(c => c.id === l.class_id);
+        if (cls) {
+            cls.totalHours += l.duration || 0;
+            cls.totalEarnings += l.earnings || 0;
+            cls.lectureCount += 1;
+        }
+    });
         }
 
        
