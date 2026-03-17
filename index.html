@@ -973,15 +973,19 @@
             </div>
         </div>
     </div>
-
+    
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <script>
         // ==========================================
         // CONFIGURATION - UPDATE THIS!
         // ==========================================
-        const API_URL = 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec';
+        //const API_URL = 'https://script.google.com/macros/s/AKfycbxNumpoV-xMhvWWmZ_iEh5zc2j0NMmXWlIyXynx3waViE5Re_FVF2ejbEbmEYUGP7k/exec';
         // Get this URL after deploying your Apps Script as a web app
         // Example: https://script.google.com/macros/s/AKfycbxxx.../exec
-        
+        const supabaseClient = window.supabase.createClient(
+                  "https://prbussyddjdlxtvoeerd.supabase.co",
+                 "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InByYnVzc3lkZGpkbHh0dm9lZXJkIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM3Njg4OTAsImV4cCI6MjA4OTM0NDg5MH0.y5Ie0TcLZCfz9-3Sz0eb1LOKHfM301fuzt2MtJW9Ra0"
+        );
         // ==========================================
         // DATA & STATE
         // ==========================================
@@ -992,164 +996,80 @@
         // ==========================================
         // INITIALIZATION
         // ==========================================
-        async function init() {
-            // Check if API URL is configured
-            if (API_URL === 'YOUR_GOOGLE_APPS_SCRIPT_URL_HERE') {
-                document.getElementById('configNotice').classList.add('show');
-            }
 
-            showLoading();
+        
+        async function loadData() {
+        const { data: classData } = await supabaseClient.from('classes').select('*');
+        const { data: lectureData } = await supabaseClient.from('lectures').select('*');
+
+        classes = classes.map(c => ({
+        ...c,
+        hourlyRate: c.hourly_rate,
+        totalHours: 0,
+        totalEarnings: 0,
+        lectureCount: 0
+        }));
             
-            try {
-                await loadDataFromSheets();
-            } catch (error) {
-                console.error('Failed to load from sheets:', error);
-                alert('Error loading data: ' + error.message + '\n\nCheck browser console (F12) for details.');
-                // Fallback to localStorage
-                loadDataFromLocal();
-            }
-            
-            updateMonthDisplay();
-            updateStats();
-            renderDashboard();
-            renderClasses();
-            renderLectures();
-            renderPayments();
-            updateClassDropdown();
-            
-            document.getElementById('lectureDate').valueAsDate = new Date();
-            hideLoading();
+        classes = classData || [];
+        lectures = lectureData || [];
         }
 
-        // ==========================================
-        // GOOGLE SHEETS API CALLS
-        // ==========================================
-        async function loadDataFromSheets() {
-            try {
-                console.log('Loading data from Google Sheets...');
-                console.log('API URL:', API_URL);
-                
-                // Load classes
-                const classesUrl = `${API_URL}?action=getClasses`;
-                console.log('Fetching classes from:', classesUrl);
-                const classesResponse = await fetch(classesUrl);
-                console.log('Classes response status:', classesResponse.status);
-                
-                const classesData = await classesResponse.json();
-                console.log('Classes data:', classesData);
-                
-                if (classesData.success) {
-                    classes = classesData.classes;
-                    console.log('Loaded', classes.length, 'classes');
-                }
+       
 
-                // Load lectures
-                const lecturesUrl = `${API_URL}?action=getLectures`;
-                console.log('Fetching lectures from:', lecturesUrl);
-                const lecturesResponse = await fetch(lecturesUrl);
-                console.log('Lectures response status:', lecturesResponse.status);
-                
-                const lecturesData = await lecturesResponse.json();
-                console.log('Lectures data:', lecturesData);
-                
-                if (lecturesData.success) {
-                    lectures = lecturesData.lectures;
-                    console.log('Loaded', lectures.length, 'lectures');
-                }
+        //save class
+        async function saveClassToDB(classData) {
+        const { data, error } = await supabaseClient
+                .from('classes')
+                .insert([{
+                name: classData.name,
+                hourly_rate: classData.hourlyRate
+        }])
+        .select();
 
-                // Save to localStorage as backup
-                saveDataToLocal();
-                console.log('Data loaded successfully!');
-            } catch (error) {
-                console.error('Error details:', error);
-                throw new Error('Failed to load data: ' + error.message);
-            }
+        if (error) throw error;
+        return data[0];
         }
 
-        async function saveClassToSheets(classData) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveClass',
-                    name: classData.name,
-                    hourlyRate: classData.hourlyRate
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to save class');
-            }
-            return result.class;
+        //save lectures
+        async function saveLectureToDB(lectureData) {
+        const { data, error } = await supabaseClient
+        .from('lectures')
+        .insert([{
+            class_id: lectureData.classId,
+            class_name: lectureData.className,
+            date: lectureData.date,
+            duration: lectureData.duration,
+            topic: lectureData.topic,
+            earnings: lectureData.earnings,
+            hourly_rate: lectureData.hourlyRate,
+            paid: lectureData.paid
+        }])
+        .select();
+
+    if (error) throw error;
+    return data[0];
+    }
+
+        //update payment
+        async function updatePayment(id, paid) {
+        const { error } = await supabaseClient
+        .from('lectures')
+        .update({ paid: paid })
+        .eq('id', id);
+
+        if (error) throw error;
         }
 
-        async function saveLectureToSheets(lectureData) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'saveLecture',
-                    ...lectureData
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to save lecture');
-            }
-            return result.lecture;
+        //delete
+        async function deleteLectureFromDB(id) {
+        await supabaseClient.from('lectures').delete().eq('id', id);
         }
 
-        async function updatePaymentInSheets(lectureId, paid) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'updatePayment',
-                    lectureId: lectureId,
-                    paid: paid
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to update payment');
-            }
-            return result.lecture;
+        async function deleteClassFromDB(id) {
+        await supabaseClient.from('classes').delete().eq('id', id);
         }
 
-        async function deleteClassFromSheets(classId) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'deleteClass',
-                    classId: classId
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to delete class');
-            }
-        }
-
-        async function deleteLectureFromSheets(lectureId) {
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    action: 'deleteLecture',
-                    lectureId: lectureId
-                })
-            });
-            
-            const result = await response.json();
-            if (!result.success) {
-                throw new Error(result.error || 'Failed to delete lecture');
-            }
-        }
+        
 
         // ==========================================
         // LOCAL STORAGE (Backup/Fallback)
@@ -1220,7 +1140,7 @@
                 const className = document.getElementById('className').value;
                 const hourlyRate = parseFloat(document.getElementById('hourlyRate').value);
                 
-                const savedClass = await saveClassToSheets({
+                const savedClass = await saveClassToDB({
                     name: className,
                     hourlyRate: hourlyRate
                 });
@@ -1229,7 +1149,7 @@
                 classes.push({
                     id: savedClass.id,
                     name: savedClass.name,
-                    hourlyRate: savedClass.hourlyRate,
+                    hourlyRate: savedClass.hourly_rate,
                     totalHours: 0,
                     totalEarnings: 0,
                     lectureCount: 0
@@ -1262,7 +1182,7 @@
                 const selectedClass = classes.find(c => c.id === classId);
                 const earnings = duration * selectedClass.hourlyRate;
                 
-                const savedLecture = await saveLectureToSheets({
+                const savedLecture = await saveLectureToDB({
                     classId: classId,
                     className: selectedClass.name,
                     date: date,
@@ -1531,7 +1451,7 @@
                 const lecture = lectures.find(l => l.id === id);
                 const newPaidStatus = !lecture.paid;
                 
-                await updatePaymentInSheets(id, newPaidStatus);
+                await updatePayment(id, newPaidStatus);;
                 
                 lecture.paid = newPaidStatus;
                 saveDataToLocal();
@@ -1554,7 +1474,7 @@
             showLoading();
             
             try {
-                await deleteClassFromSheets(id);
+                await deleteClassFromDB(id);
                 
                 classes = classes.filter(c => c.id !== id);
                 lectures = lectures.filter(l => l.classId !== id);
@@ -1580,7 +1500,7 @@
             showLoading();
             
             try {
-                await deleteLectureFromSheets(id);
+                await deleteLectureFromDB(id);
                 
                 const lecture = lectures.find(l => l.id === id);
                 const classObj = classes.find(c => c.id === lecture.classId);
@@ -1615,7 +1535,29 @@
             document.getElementById(tab + 'Tab').classList.add('active');
         }
 
-        // Initialize app
+                // Initialize app
+                async function init() {
+            showLoading();
+        
+            try {
+                await loadData();
+            } catch (e) {
+                console.error(e);
+                loadDataFromLocal();
+            }
+        
+            updateMonthDisplay();
+            updateStats();
+            renderDashboard();
+            renderClasses();
+            renderLectures();
+            renderPayments();
+            updateClassDropdown();
+        
+            document.getElementById('lectureDate').valueAsDate = new Date();
+        
+            hideLoading();
+        }
         init();
     </script>
 </body>
