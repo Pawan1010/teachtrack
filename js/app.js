@@ -232,7 +232,11 @@ document.getElementById('lectureForm').addEventListener('submit', async (e) => {
         });
         
         // Add to local array
-        lectures.push(savedLecture);
+        lectures.push({
+        ...savedLecture,
+            className: savedLecture.class_name,  // 🔥 fix
+            classId: savedLecture.class_id
+        });;
         
         // Update class totals
         selectedClass.totalHours += duration;

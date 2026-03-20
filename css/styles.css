@@ -254,6 +254,7 @@ h1 {
     padding: 30px;
     border-radius: 16px;
     animation: fadeInUp 0.8s ease 0.4s both;
+    width: 100%;
 }
 
 h2 {
@@ -500,6 +501,7 @@ input[type="checkbox"] {
     display: flex;
     gap: 10px;
     margin-bottom: 25px;
+    flex-wrap: wrap;
 }
 
 .tab {
