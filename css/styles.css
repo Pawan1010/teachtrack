@@ -280,6 +280,8 @@ h2 {
 
 .form-group {
     margin-bottom: 20px;
+    min-width: 0;
+    overflow: hidden;
 }
 
 label {
@@ -295,6 +297,7 @@ label {
 
 input, select {
     width: 100%;
+    max-width: 100%;
     padding: 14px 16px;
     background: var(--bg-dark);
     border: 1px solid var(--border);
@@ -303,6 +306,8 @@ input, select {
     font-size: 1em;
     font-family: 'DM Sans', sans-serif;
     transition: all 0.3s;
+    box-sizing: border-box;
+    min-width: 0;
 }
 
 input:focus, select:focus {
